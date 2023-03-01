@@ -89,7 +89,7 @@ func (executor *Executor) getServiceForFunctionAPI(w http.ResponseWriter, r *htt
 			et.DeleteFuncSvcFromCache(ctx, fsvc)
 			active--
 		}
-
+		logger.Info("active in api.go", zap.Any("active", active))
 		if active >= concurrency {
 			errMsg := fmt.Sprintf("max concurrency reached for %v. All %v instance are active", fn.ObjectMeta.Name, concurrency)
 			logger.Error("error occurred", zap.String("error", errMsg))

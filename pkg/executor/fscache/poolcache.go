@@ -36,6 +36,9 @@ const (
 	markAvailable
 	deleteValue
 	setCPUUtilization
+	specializationStart
+	specializationEnd
+	getVirtualCapacity
 )
 
 type (
@@ -45,11 +48,10 @@ type (
 		currentCPUUsage resource.Quantity // current cpu usage of the specialized function pod
 		cpuLimit        resource.Quantity // if currentCPUUsage is more than cpuLimit cache miss occurs in getValue request
 	}
-
 	funcSvcGroup struct {
-		svcs map[string]*funcSvcInfo
+		specializationInProgress int
+		svcs                     map[string]*funcSvcInfo
 	}
-
 	// PoolCache implements a simple cache implementation having values mapped by two keys [function][address].
 	// As of now PoolCache is only used by poolmanager executor
 	PoolCache struct {
@@ -70,9 +72,10 @@ type (
 	}
 	response struct {
 		error
-		allValues   []*FuncSvc
-		value       *FuncSvc
-		totalActive int
+		allValues       []*FuncSvc
+		value           *FuncSvc
+		totalActive     int
+		virtualCapacity int
 	}
 )
 
@@ -94,29 +97,36 @@ func (c *PoolCache) service() {
 		resp := &response{}
 		switch req.requestType {
 		case getValue:
-			funcSvcGroup, ok := c.cache[req.function]
+			group, ok := c.cache[req.function]
 			found := false
 			if !ok {
 				resp.error = ferror.MakeError(ferror.ErrorNotFound,
 					fmt.Sprintf("function Name '%v' not found", req.function))
+				if _, ok := c.cache[req.function]; !ok {
+					c.cache[req.function] = &funcSvcGroup{
+						svcs: make(map[string]*funcSvcInfo),
+					}
+				}
+				c.cache[req.function].specializationInProgress = c.cache[req.function].specializationInProgress + 1
 			} else {
-				for addr := range funcSvcGroup.svcs {
-					if funcSvcGroup.svcs[addr].activeRequests < req.requestsPerPod &&
-						funcSvcGroup.svcs[addr].currentCPUUsage.Cmp(funcSvcGroup.svcs[addr].cpuLimit) < 1 {
+				for addr := range group.svcs {
+					if group.svcs[addr].activeRequests < req.requestsPerPod &&
+						group.svcs[addr].currentCPUUsage.Cmp(group.svcs[addr].cpuLimit) < 1 {
 						// mark active
-						funcSvcGroup.svcs[addr].activeRequests++
+						group.svcs[addr].activeRequests++
 						if c.logger.Core().Enabled(zap.DebugLevel) {
-							otelUtils.LoggerWithTraceID(req.ctx, c.logger).Debug("Increase active requests with getValue", zap.String("function", req.function), zap.String("address", addr), zap.Int("activeRequests", funcSvcGroup.svcs[addr].activeRequests))
+							otelUtils.LoggerWithTraceID(req.ctx, c.logger).Debug("Increase active requests with getValue", zap.String("function", req.function), zap.String("address", addr), zap.Int("activeRequests", group.svcs[addr].activeRequests))
 						}
-						resp.value = funcSvcGroup.svcs[addr].val
+						resp.value = group.svcs[addr].val
 						found = true
 						break
 					}
 				}
 				if !found {
 					resp.error = ferror.MakeError(ferror.ErrorNotFound, fmt.Sprintf("function '%v' all functions are busy", req.function))
+					c.cache[req.function].specializationInProgress = c.cache[req.function].specializationInProgress + 1
 				}
-				resp.totalActive = len(funcSvcGroup.svcs)
+				resp.totalActive = len(group.svcs)
 			}
 			req.responseChannel <- resp
 		case setValue:
@@ -134,6 +144,21 @@ func (c *PoolCache) service() {
 				otelUtils.LoggerWithTraceID(req.ctx, c.logger).Debug("Increase active requests with setValue", zap.String("function", req.function), zap.String("address", req.address), zap.Int("activeRequests", c.cache[req.function].svcs[req.address].activeRequests))
 			}
 			c.cache[req.function].svcs[req.address].cpuLimit = req.cpuUsage
+			c.cache[req.function].specializationInProgress = c.cache[req.function].specializationInProgress - 1
+		case specializationStart:
+			if _, ok := c.cache[req.function]; !ok {
+				c.cache[req.function] = &funcSvcGroup{
+					svcs: make(map[string]*funcSvcInfo),
+				}
+			}
+			c.cache[req.function].specializationInProgress = c.cache[req.function].specializationInProgress + 1
+		case specializationEnd:
+			if _, ok := c.cache[req.function]; !ok {
+				c.cache[req.function] = &funcSvcGroup{
+					svcs: make(map[string]*funcSvcInfo),
+				}
+			}
+			c.cache[req.function].specializationInProgress = c.cache[req.function].specializationInProgress - 1
 		case listAvailableValue:
 			vals := make([]*FuncSvc, 0)
 			for key1, values := range c.cache {
@@ -174,6 +199,13 @@ func (c *PoolCache) service() {
 					}
 				}
 			}
+		case getVirtualCapacity:
+			if _, ok := c.cache[req.function]; !ok {
+				resp.virtualCapacity = 0
+			} else {
+				resp.virtualCapacity = (c.cache[req.function].specializationInProgress + len(c.cache[req.function].svcs)) * req.requestsPerPod
+			}
+			req.responseChannel <- resp
 		case deleteValue:
 			delete(c.cache[req.function].svcs, req.address)
 			req.responseChannel <- resp
@@ -199,6 +231,18 @@ func (c *PoolCache) GetSvcValue(ctx context.Context, function string, requestsPe
 	return resp.value, resp.totalActive, resp.error
 }
 
+func (c *PoolCache) GetVirtualCapacity(ctx context.Context, function string, requestsPerPod int) int {
+	respChannel := make(chan *response)
+	c.requestChannel <- &request{
+		requestType:     getVirtualCapacity,
+		function:        function,
+		responseChannel: respChannel,
+		requestsPerPod: requestsPerPod,
+	}
+	resp := <-respChannel
+	return resp.virtualCapacity
+}
+
 // ListAvailableValue returns a list of the available function services stored in the Cache
 func (c *PoolCache) ListAvailableValue() []*FuncSvc {
 	respChannel := make(chan *response)
@@ -208,6 +252,22 @@ func (c *PoolCache) ListAvailableValue() []*FuncSvc {
 	}
 	resp := <-respChannel
 	return resp.allValues
+}
+
+func (c *PoolCache) SpecializationStart(ctx context.Context, function string) {
+	c.requestChannel <- &request{
+		ctx:         ctx,
+		requestType: specializationStart,
+		function:    function,
+	}
+}
+
+func (c *PoolCache) SpecializationEnd(ctx context.Context, function string) {
+	c.requestChannel <- &request{
+		ctx:         ctx,
+		requestType: specializationEnd,
+		function:    function,
+	}
 }
 
 // SetValue marks the value at key [function][address] as active(begin used)

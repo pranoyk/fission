@@ -192,6 +192,7 @@ func (fsc *FunctionServiceCache) GetFuncSvc(ctx context.Context, m *metav1.Objec
 	key := crd.CacheKey(m)
 
 	fsvc, active, err := fsc.connFunctionCache.GetSvcValue(ctx, key, requestsPerPod)
+	fsc.logger.Info("return value of get svc value", zap.Any("fsvc", fsvc), zap.Any("active", active), zap.Any("error", err))
 	if err != nil {
 		fsc.logger.Info("Not found in Cache")
 		return nil, active, err
@@ -224,6 +225,18 @@ func (fsc *FunctionServiceCache) GetByFunctionUID(uid types.UID) (*FuncSvc, erro
 
 	fsvcCopy := *fsvc
 	return &fsvcCopy, nil
+}
+
+func (fsc *FunctionServiceCache) SpecializationStart(ctx context.Context, function *metav1.ObjectMeta) {
+	fsc.connFunctionCache.SpecializationStart(ctx, crd.CacheKey(function))
+}
+
+func (fsc *FunctionServiceCache) SpecializationEnd(ctx context.Context, function *metav1.ObjectMeta) {
+	fsc.connFunctionCache.SpecializationEnd(ctx, crd.CacheKey(function))
+}
+
+func (fsc *FunctionServiceCache) GetVirtualCapacity(ctx context.Context, function *metav1.ObjectMeta, requestsPerPod int) int {
+	return fsc.connFunctionCache.GetVirtualCapacity(ctx, crd.CacheKey(function), requestsPerPod)
 }
 
 // AddFunc adds a function service to pool cache.
