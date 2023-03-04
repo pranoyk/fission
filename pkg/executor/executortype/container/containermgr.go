@@ -200,9 +200,11 @@ func (caaf *Container) GetFuncSvcFromPoolCache(ctx context.Context, fn *fv1.Func
 }
 
 // GetVirtualCapacity has not been implemented for Container Functions
-func (caaf *Container) GetVirtualCapacity(ctx context.Context, fn *fv1.Function, requestsPerPod int) int {
-	return 0
+func (caaf *Container) GetVirtualCapacity(ctx context.Context, fn *fv1.Function, requestsPerPod int) (int, int, int) {
+	return 0, 0, 0
 }
+
+func (caaf *Container) SpecializationStart(context.Context, *fv1.Function) {}
 
 // TapService makes a TouchByAddress request to the cache.
 func (caaf *Container) TapService(ctx context.Context, svcHost string) error {

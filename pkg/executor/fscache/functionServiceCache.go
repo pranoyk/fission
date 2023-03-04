@@ -235,7 +235,7 @@ func (fsc *FunctionServiceCache) SpecializationEnd(ctx context.Context, function
 	fsc.connFunctionCache.SpecializationEnd(ctx, crd.CacheKey(function))
 }
 
-func (fsc *FunctionServiceCache) GetVirtualCapacity(ctx context.Context, function *metav1.ObjectMeta, requestsPerPod int) int {
+func (fsc *FunctionServiceCache) GetVirtualCapacity(ctx context.Context, function *metav1.ObjectMeta, requestsPerPod int) (int, int, int) {
 	return fsc.connFunctionCache.GetVirtualCapacity(ctx, crd.CacheKey(function), requestsPerPod)
 }
 

@@ -220,9 +220,14 @@ func (gpm *GenericPoolManager) GetFuncSvcFromPoolCache(ctx context.Context, fn *
 	return gpm.fsCache.GetFuncSvc(ctx, &fn.ObjectMeta, requestsPerPod)
 }
 
-func (gpm *GenericPoolManager) GetVirtualCapacity(ctx context.Context, fn *fv1.Function, requestsPerPod int) int {
+func (gpm *GenericPoolManager) GetVirtualCapacity(ctx context.Context, fn *fv1.Function, requestsPerPod int) (int, int, int) {
 	otelUtils.SpanTrackEvent(ctx, "GetVirtualCapacity", otelUtils.GetAttributesForFunction(fn)...)
 	return gpm.fsCache.GetVirtualCapacity(ctx, &fn.ObjectMeta, requestsPerPod)
+}
+
+func (gpm *GenericPoolManager) SpecializationStart(ctx context.Context, fn *fv1.Function) {
+	otelUtils.SpanTrackEvent(ctx, "GetVirtualCapacity", otelUtils.GetAttributesForFunction(fn)...)
+	gpm.fsCache.SpecializationStart(ctx, &fn.ObjectMeta)
 }
 
 func (gpm *GenericPoolManager) DeleteFuncSvcFromCache(ctx context.Context, fsvc *fscache.FuncSvc) {

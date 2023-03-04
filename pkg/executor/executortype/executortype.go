@@ -42,7 +42,9 @@ type ExecutorType interface {
 	GetFuncSvcFromPoolCache(ctx context.Context, fn *fv1.Function, requestsPerPod int) (*fscache.FuncSvc, int, error)
 
 	// GetVirtualCapacity retrives the virtual capacity of a function
-	GetVirtualCapacity(context.Context, *fv1.Function, int) int
+	GetVirtualCapacity(context.Context, *fv1.Function, int) (int, int, int)
+
+	SpecializationStart(context.Context, *fv1.Function)
 
 	// DeleteFuncSvcFromCache deletes function service entry in cache.
 	DeleteFuncSvcFromCache(context.Context, *fscache.FuncSvc)

@@ -57,14 +57,23 @@ type (
 
 		fissionClient versioned.Interface
 
-		requestChan chan *createFuncServiceRequest
-		fsCreateWg  sync.Map
+		requestChan    chan *createFuncServiceRequest
+		specializeChan chan *waitSpecializationRequest
+		fsCreateWg     sync.Map
+	}
+
+	waitSpecializationRequest struct {
+		context       context.Context
+		function      *fv1.Function
+		requestPerPod int
+		respChan      chan *createFuncServiceResponse
 	}
 
 	createFuncServiceRequest struct {
-		context  context.Context
-		function *fv1.Function
-		respChan chan *createFuncServiceResponse
+		context       context.Context
+		function      *fv1.Function
+		requestPerPod int
+		respChan      chan *createFuncServiceResponse
 	}
 
 	createFuncServiceResponse struct {
@@ -83,7 +92,8 @@ func MakeExecutor(ctx context.Context, logger *zap.Logger, cms *cms.ConfigSecret
 		fissionClient: fissionClient,
 		executorTypes: types,
 
-		requestChan: make(chan *createFuncServiceRequest),
+		requestChan:    make(chan *createFuncServiceRequest),
+		specializeChan: make(chan *waitSpecializationRequest),
 	}
 
 	// Run all informers
@@ -98,6 +108,7 @@ func MakeExecutor(ctx context.Context, logger *zap.Logger, cms *cms.ConfigSecret
 	}
 
 	go executor.serveCreateFuncServices()
+	go executor.checkSpecializationFinished()
 
 	return executor, nil
 }
@@ -111,10 +122,42 @@ func MakeExecutor(ctx context.Context, logger *zap.Logger, cms *cms.ConfigSecret
 func (executor *Executor) serveCreateFuncServices() {
 	for {
 		req := <-executor.requestChan
+		executor.logger.Debug("inside serveCreateFuncServices req", zap.Any("executor.requestChan", req.function.Spec.InvokeStrategy.ExecutionStrategy.ExecutorType))
 		fnMetadata := &req.function.ObjectMeta
 
 		if req.function.Spec.InvokeStrategy.ExecutionStrategy.ExecutorType == fv1.ExecutorTypePoolmgr {
 			go func() {
+				t := req.function.Spec.InvokeStrategy.ExecutionStrategy.ExecutorType
+				e, ok := executor.executorTypes[t]
+				if !ok {
+					req.respChan <- &createFuncServiceResponse{
+						funcSvc: nil,
+						err:     errors.Errorf("Unknown executor type '%v'", t),
+					}
+					return
+				}
+				virtualCapacityContext, cancel := context.WithTimeout(req.context, 5*time.Second)
+				defer cancel()
+				virtualCapacity, active, specializing := e.GetVirtualCapacity(virtualCapacityContext, req.function, req.requestPerPod)
+				executor.logger.Debug("from get virtual capacity", zap.Int("virtualCapacity", virtualCapacity),
+					zap.Any("active", active), zap.Any("specializing", specializing))
+				if specializing == 0 {
+					e.SpecializationStart(virtualCapacityContext, req.function)
+				} else if active == 0 && specializing > 0 {
+					respChan := make(chan *createFuncServiceResponse)
+					executor.specializeChan <- &waitSpecializationRequest{
+						context:       virtualCapacityContext,
+						function:      req.function,
+						requestPerPod: req.requestPerPod,
+						respChan:      respChan,
+					}
+					resp := <-respChan
+					req.respChan <- &createFuncServiceResponse{
+						funcSvc: resp.funcSvc,
+						err:     resp.err,
+					}
+					return
+				}
 				buffer := 10 // add some buffer time for specialization
 				specializationTimeout := req.function.Spec.InvokeStrategy.ExecutionStrategy.SpecializationTimeout
 
@@ -208,6 +251,34 @@ func (executor *Executor) serveCreateFuncServices() {
 					err:     err,
 				}
 			}()
+		}
+	}
+}
+
+func (executor *Executor) checkSpecializationFinished() {
+	for {
+		req := <-executor.specializeChan
+		// wg := &sync.WaitGroup{}
+		if req.function.Spec.InvokeStrategy.ExecutionStrategy.ExecutorType == fv1.ExecutorTypePoolmgr {
+			// wg.Add(1)
+			go func() {
+				// defer wg.Done()
+				t := req.function.Spec.InvokeStrategy.ExecutionStrategy.ExecutorType
+				e := executor.executorTypes[t]
+				for {
+					fsvc, active, err := e.GetFuncSvcFromPoolCache(req.context, req.function, req.requestPerPod)
+					executor.logger.Debug("inside check specialization finished", zap.Any("fsvc", fsvc), zap.Any("active", active), zap.Any("err", err))
+					if err == nil {
+						req.respChan <- &createFuncServiceResponse{
+							funcSvc: fsvc,
+							err:     err,
+						}
+						break
+					}
+					continue
+				}
+			}()
+			// wg.Wait()
 		}
 	}
 }

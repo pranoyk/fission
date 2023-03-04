@@ -206,9 +206,11 @@ func (deploy *NewDeploy) GetFuncSvcFromPoolCache(ctx context.Context, fn *fv1.Fu
 }
 
 // GetVirtualCapacity has not been implemented for NewDeployment
-func (deploy *NewDeploy) GetVirtualCapacity(ctx context.Context, fn *fv1.Function, requestsPerPod int) int {
-	return 0
+func (deploy *NewDeploy) GetVirtualCapacity(ctx context.Context, fn *fv1.Function, requestsPerPod int) (int, int, int) {
+	return 0, 0, 0
 }
+
+func (deploy *NewDeploy) SpecializationStart(context.Context, *fv1.Function) {}
 
 // TapService makes a TouchByAddress request to the cache.
 func (deploy *NewDeploy) TapService(ctx context.Context, svcHost string) error {
