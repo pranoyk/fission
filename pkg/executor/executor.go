@@ -73,6 +73,7 @@ type (
 		context       context.Context
 		function      *fv1.Function
 		requestPerPod int
+		concurrency   int
 		respChan      chan *createFuncServiceResponse
 	}
 
@@ -113,6 +114,19 @@ func MakeExecutor(ctx context.Context, logger *zap.Logger, cms *cms.ConfigSecret
 	return executor, nil
 }
 
+func (executor *Executor) isNewSpecializationNeeded(requestsPerPod int, specializing int, active int, totalRequests int) bool {
+	if totalRequests <= requestsPerPod && specializing > 0 {
+		return false
+	} else if specializing*requestsPerPod > totalRequests {
+		return false
+	}
+	return true
+}
+
+func (executor *Executor) isReqCapacityMoreThanPermissible(specializing int, active int, concurrency int) bool {
+	return specializing*active < concurrency
+}
+
 // All non-cached function service requests go through this goroutine
 // serially. It parallelizes requests for different functions, and
 // ensures that for a given function, only one request causes a pod to
@@ -138,12 +152,20 @@ func (executor *Executor) serveCreateFuncServices() {
 				}
 				virtualCapacityContext, cancel := context.WithTimeout(req.context, 5*time.Second)
 				defer cancel()
-				virtualCapacity, active, specializing := e.GetVirtualCapacity(virtualCapacityContext, req.function, req.requestPerPod)
-				executor.logger.Debug("from get virtual capacity", zap.Int("virtualCapacity", virtualCapacity),
-					zap.Any("active", active), zap.Any("specializing", specializing))
-				if specializing == 0 {
-					e.SpecializationStart(virtualCapacityContext, req.function)
-				} else if active == 0 && specializing > 0 {
+				active, specializing, totalRequests := e.GetVirtualCapacity(virtualCapacityContext, req.function, req.requestPerPod)
+				if executor.isNewSpecializationNeeded(req.requestPerPod, specializing, active, totalRequests) {
+					if executor.isReqCapacityMoreThanPermissible(specializing, active, req.concurrency) {
+						e.SpecializationStart(virtualCapacityContext, req.function)
+					} else {
+						errMsg := errors.Errorf("max concurrency reached for %v. All %v instance are active", req.function.ObjectMeta.Name, req.concurrency)
+						executor.logger.Error("error occurred", zap.String("error", errMsg.Error()))
+						req.respChan <- &createFuncServiceResponse{
+							funcSvc: nil,
+							err:     errMsg,
+						}
+						return
+					}
+				} else {
 					respChan := make(chan *createFuncServiceResponse)
 					executor.specializeChan <- &waitSpecializationRequest{
 						context:       virtualCapacityContext,

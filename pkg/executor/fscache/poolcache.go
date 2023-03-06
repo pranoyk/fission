@@ -50,6 +50,7 @@ type (
 	}
 	funcSvcGroup struct {
 		specializationInProgress int
+		requests                 int
 		svcs                     map[string]*funcSvcInfo
 	}
 	// PoolCache implements a simple cache implementation having values mapped by two keys [function][address].
@@ -75,8 +76,8 @@ type (
 		allValues         []*FuncSvc
 		value             *FuncSvc
 		totalActive       int
-		virtualCapacity   int
 		totalInSpecialize int
+		totalRequests     int
 	}
 )
 
@@ -195,15 +196,14 @@ func (c *PoolCache) service() {
 			}
 		case getVirtualCapacity:
 			if _, ok := c.cache[req.function]; ok {
-				resp.virtualCapacity = (c.cache[req.function].specializationInProgress + len(c.cache[req.function].svcs)) * req.requestsPerPod
-				c.logger.Info("virtual capacity calculation", zap.Any("c.cache[req.function].specializationInProgress", c.cache[req.function].specializationInProgress),
-					zap.Any("len(c.cache[req.function].svcs)", len(c.cache[req.function].svcs)), zap.Any("req.requestsPerPod", req.requestsPerPod))
 				resp.totalActive = len(c.cache[req.function].svcs)
 				resp.totalInSpecialize = c.cache[req.function].specializationInProgress
+				c.cache[req.function].requests = c.cache[req.function].requests + 1
+				resp.totalRequests = c.cache[req.function].requests
 			} else {
-				resp.virtualCapacity = 0
 				resp.totalActive = 0
 				resp.totalInSpecialize = 0
+				resp.totalRequests = 0
 			}
 			req.responseChannel <- resp
 		case deleteValue:
@@ -241,7 +241,7 @@ func (c *PoolCache) GetVirtualCapacity(ctx context.Context, function string, req
 		requestsPerPod:  requestsPerPod,
 	}
 	resp := <-respChannel
-	return resp.virtualCapacity, resp.totalActive, resp.totalInSpecialize
+	return resp.totalActive, resp.totalInSpecialize, resp.totalRequests
 }
 
 // ListAvailableValue returns a list of the available function services stored in the Cache

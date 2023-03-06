@@ -59,12 +59,13 @@ func (executor *Executor) getServiceForFunctionAPI(w http.ResponseWriter, r *htt
 	logger := otelUtils.LoggerWithTraceID(ctx, executor.logger)
 
 	var requestsPerpod int
+	var concurrency int
 	// Check function -> svc cache
 	logger.Debug("checking for cached function service",
 		zap.String("function_name", fn.ObjectMeta.Name),
 		zap.String("function_namespace", fn.ObjectMeta.Namespace))
 	if t == fv1.ExecutorTypePoolmgr && !fn.Spec.OnceOnly {
-		concurrency := fn.Spec.Concurrency
+		concurrency = fn.Spec.Concurrency
 		if concurrency == 0 {
 			concurrency = 500
 		}
@@ -113,7 +114,7 @@ func (executor *Executor) getServiceForFunctionAPI(w http.ResponseWriter, r *htt
 		}
 	}
 
-	serviceName, err := executor.getServiceForFunction(ctx, fn, requestsPerpod)
+	serviceName, err := executor.getServiceForFunction(ctx, fn, requestsPerpod, concurrency)
 	if err != nil {
 		code, msg := ferror.GetHTTPError(err)
 		logger.Error("error getting service for function",
@@ -146,13 +147,14 @@ func (executor *Executor) writeResponse(w http.ResponseWriter, serviceName strin
 // stale addresses are not returned to the router.
 // To make it optimal, plan is to add an eager cache invalidator function that watches for pod deletion events and
 // invalidates the cache entry if the pod address was cached.
-func (executor *Executor) getServiceForFunction(ctx context.Context, fn *fv1.Function, requestsPerPod int) (string, error) {
+func (executor *Executor) getServiceForFunction(ctx context.Context, fn *fv1.Function, requestsPerPod int, concurrency int) (string, error) {
 	respChan := make(chan *createFuncServiceResponse)
 	executor.requestChan <- &createFuncServiceRequest{
-		context:  ctx,
-		function: fn,
+		context:       ctx,
+		function:      fn,
 		requestPerPod: requestsPerPod,
-		respChan: respChan,
+		concurrency:   concurrency,
+		respChan:      respChan,
 	}
 	resp := <-respChan
 	if resp.err != nil {
