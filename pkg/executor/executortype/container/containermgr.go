@@ -204,6 +204,8 @@ func (caaf *Container) GetVirtualCapacity(ctx context.Context, fn *fv1.Function,
 	return 0, 0, 0
 }
 
+func (caaf *Container) ResetRequest(ctx context.Context, fn *fv1.Function) {}
+
 func (caaf *Container) SpecializationStart(context.Context, *fv1.Function) {}
 
 // TapService makes a TouchByAddress request to the cache.

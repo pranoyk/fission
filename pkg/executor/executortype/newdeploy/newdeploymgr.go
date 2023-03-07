@@ -210,6 +210,8 @@ func (deploy *NewDeploy) GetVirtualCapacity(ctx context.Context, fn *fv1.Functio
 	return 0, 0, 0
 }
 
+func (deploy *NewDeploy) ResetRequest(ctx context.Context, fn *fv1.Function) {}
+
 func (deploy *NewDeploy) SpecializationStart(context.Context, *fv1.Function) {}
 
 // TapService makes a TouchByAddress request to the cache.

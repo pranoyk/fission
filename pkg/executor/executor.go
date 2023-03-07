@@ -291,6 +291,7 @@ func (executor *Executor) checkSpecializationFinished() {
 					fsvc, active, err := e.GetFuncSvcFromPoolCache(req.context, req.function, req.requestPerPod)
 					executor.logger.Debug("inside check specialization finished", zap.Any("fsvc", fsvc), zap.Any("active", active), zap.Any("err", err))
 					if err == nil {
+						e.ResetRequest(req.context, req.function)
 						req.respChan <- &createFuncServiceResponse{
 							funcSvc: fsvc,
 							err:     err,

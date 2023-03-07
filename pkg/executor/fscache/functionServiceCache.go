@@ -247,6 +247,10 @@ func (fsc *FunctionServiceCache) AddFunc(ctx context.Context, fsvc FuncSvc) {
 	fsvc.Atime = now
 }
 
+func (fsc *FunctionServiceCache) ResetRequest(ctx context.Context, function *metav1.ObjectMeta) {
+	fsc.connFunctionCache.ResetRequest(ctx, crd.CacheKey(function))
+}
+
 // SetCPUUtilizaton updates/sets CPUutilization in the pool cache
 func (fsc *FunctionServiceCache) SetCPUUtilizaton(key string, svcHost string, cpuUsage resource.Quantity) {
 	fsc.connFunctionCache.SetCPUUtilization(key, svcHost, cpuUsage)

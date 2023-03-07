@@ -225,6 +225,11 @@ func (gpm *GenericPoolManager) GetVirtualCapacity(ctx context.Context, fn *fv1.F
 	return gpm.fsCache.GetVirtualCapacity(ctx, &fn.ObjectMeta, requestsPerPod)
 }
 
+func (gpm *GenericPoolManager) ResetRequest(ctx context.Context, fn *fv1.Function) {
+	otelUtils.SpanTrackEvent(ctx, "GetVirtualCapacity", otelUtils.GetAttributesForFunction(fn)...)
+	gpm.fsCache.ResetRequest(ctx, &fn.ObjectMeta)
+}
+
 func (gpm *GenericPoolManager) SpecializationStart(ctx context.Context, fn *fv1.Function) {
 	otelUtils.SpanTrackEvent(ctx, "GetVirtualCapacity", otelUtils.GetAttributesForFunction(fn)...)
 	gpm.fsCache.SpecializationStart(ctx, &fn.ObjectMeta)

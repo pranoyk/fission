@@ -39,6 +39,7 @@ const (
 	specializationStart
 	specializationEnd
 	getVirtualCapacity
+	resetRequest
 )
 
 type (
@@ -139,6 +140,7 @@ func (c *PoolCache) service() {
 				otelUtils.LoggerWithTraceID(req.ctx, c.logger).Debug("Increase active requests with setValue", zap.String("function", req.function), zap.String("address", req.address), zap.Int("activeRequests", c.cache[req.function].svcs[req.address].activeRequests))
 			}
 			c.cache[req.function].svcs[req.address].cpuLimit = req.cpuUsage
+			c.cache[req.function].requests = c.cache[req.function].requests - 1
 			c.cache[req.function].specializationInProgress = c.cache[req.function].specializationInProgress - 1
 		case specializationStart:
 			if _, ok := c.cache[req.function]; !ok {
@@ -206,6 +208,8 @@ func (c *PoolCache) service() {
 				resp.totalRequests = 0
 			}
 			req.responseChannel <- resp
+		case resetRequest:
+			c.cache[req.function].requests = c.cache[req.function].requests - 1
 		case deleteValue:
 			delete(c.cache[req.function].svcs, req.address)
 			req.responseChannel <- resp
@@ -230,6 +234,16 @@ func (c *PoolCache) GetSvcValue(ctx context.Context, function string, requestsPe
 	resp := <-respChannel
 
 	return resp.value, resp.totalActive, resp.error
+}
+
+func (c *PoolCache) ResetRequest(ctx context.Context, function string) {
+	respChannel := make(chan *response)
+	c.requestChannel <- &request{
+		ctx:             ctx,
+		requestType:     resetRequest,
+		function:        function,
+		responseChannel: respChannel,
+	}
 }
 
 func (c *PoolCache) GetVirtualCapacity(ctx context.Context, function string, requestsPerPod int) (int, int, int) {

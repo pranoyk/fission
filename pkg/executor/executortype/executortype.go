@@ -41,6 +41,8 @@ type ExecutorType interface {
 	// GetFuncSvcFromPoolCache retrieves function service and number of active instances after filtering on requestsPerPod and CPULimit
 	GetFuncSvcFromPoolCache(ctx context.Context, fn *fv1.Function, requestsPerPod int) (*fscache.FuncSvc, int, error)
 
+	ResetRequest(context.Context, *fv1.Function)
+
 	// GetVirtualCapacity retrives the virtual capacity of a function
 	GetVirtualCapacity(context.Context, *fv1.Function, int) (int, int, int)
 
