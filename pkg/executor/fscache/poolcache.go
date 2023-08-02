@@ -54,7 +54,8 @@ type (
 		svcWaiting int
 		svcs       map[string]*funcSvcInfo
 		queue      *Queue
-		retain     int
+		toRetain   int
+		retained   int
 	}
 
 	// PoolCache implements a simple cache implementation having values mapped by two keys [function][address].
@@ -76,7 +77,7 @@ type (
 		cpuUsage        resource.Quantity
 		responseChannel chan *response
 		concurrency     int
-		retain          int
+		toRetain        int
 	}
 	response struct {
 		error
@@ -174,7 +175,8 @@ func (c *PoolCache) service() {
 			if _, ok := c.cache[req.function].svcs[req.address]; !ok {
 				c.cache[req.function].svcs[req.address] = &funcSvcInfo{}
 			}
-			c.cache[req.function].retain = req.retain
+			c.cache[req.function].toRetain = req.toRetain
+			c.cache[req.function].retained = 0
 			c.cache[req.function].svcs[req.address].val = req.value
 			c.cache[req.function].svcs[req.address].activeRequests++
 			if c.cache[req.function].svcWaiting > 0 {
@@ -205,22 +207,25 @@ func (c *PoolCache) service() {
 		case listAvailableValue:
 			vals := make([]*FuncSvc, 0)
 			for key1, values := range c.cache {
+				c.logger.Info("In listAvailableValue", zap.Any("value.toRetain", values.toRetain), zap.Any("value.retained", values.retained), zap.Any("value.svcs", len(values.svcs)))
+				if values.retained < values.toRetain && values.retained < len(values.svcs) {
+					values.retained++
+					c.logger.Info("In listAvailableValue", zap.Any("value.toRetain", values.toRetain), zap.Any("value.retained", values.retained), zap.Any("value.svcs", len(values.svcs)))
+					continue
+				}
 				for key2, value := range values.svcs {
 					debugLevel := c.logger.Core().Enabled(zap.DebugLevel)
 					if debugLevel {
 						otelUtils.LoggerWithTraceID(req.ctx, c.logger).Debug("Reading active requests", zap.String("function", key1), zap.String("address", key2), zap.Int("activeRequests", value.activeRequests))
 					}
-					c.logger.Info("In listAvailableValue", zap.Any("value.retain", values.retain), zap.Any("value.activeRequests", value.activeRequests))
-					if values.retain == 0 && value.activeRequests == 0 {
+					c.logger.Info("In listAvailableValue", zap.Any("value.toRetain", values.toRetain), zap.Any("value.retained", values.retained), zap.Any("value.activeRequests", value.activeRequests))
+					if values.retained == values.toRetain || values.toRetain == 0 && value.activeRequests == 0 {
 						if debugLevel {
 							otelUtils.LoggerWithTraceID(req.ctx, c.logger).Debug("Function service with no active requests", zap.String("function", key1), zap.String("address", key2), zap.Int("activeRequests", value.activeRequests))
 						}
 						vals = append(vals, value.val)
 					}
-					if values.retain > 0 {
-						values.retain--
-					}
-					c.logger.Info("final count", zap.Any("value.retain", values.retain), zap.Any("value.activeRequests", value.activeRequests))
+					c.logger.Info("final count", zap.Any("value.toRetain", values.toRetain), zap.Any("value.retained", values.retained), zap.Any("value.activeRequests", value.activeRequests))
 				}
 			}
 			resp.allValues = vals
@@ -353,7 +358,7 @@ func (c *PoolCache) SetSvcValue(ctx context.Context, function, address string, v
 		cpuUsage:        cpuLimit,
 		requestsPerPod:  requestsPerPod,
 		responseChannel: respChannel,
-		retain:          2,
+		toRetain:        2,
 	}
 }
 
