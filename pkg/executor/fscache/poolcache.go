@@ -48,6 +48,7 @@ type (
 		activeRequests  int               // number of requests served by function pod
 		currentCPUUsage resource.Quantity // current cpu usage of the specialized function pod
 		cpuLimit        resource.Quantity // if currentCPUUsage is more than cpuLimit cache miss occurs in getValue request
+		retain          int
 	}
 
 	funcSvcGroup struct {
@@ -75,6 +76,7 @@ type (
 		cpuUsage        resource.Quantity
 		responseChannel chan *response
 		concurrency     int
+		retain          int
 	}
 	response struct {
 		error
@@ -207,11 +209,15 @@ func (c *PoolCache) service() {
 					if debugLevel {
 						otelUtils.LoggerWithTraceID(req.ctx, c.logger).Debug("Reading active requests", zap.String("function", key1), zap.String("address", key2), zap.Int("activeRequests", value.activeRequests))
 					}
-					if value.activeRequests == 0 {
-						if debugLevel {
-							otelUtils.LoggerWithTraceID(req.ctx, c.logger).Debug("Function service with no active requests", zap.String("function", key1), zap.String("address", key2), zap.Int("activeRequests", value.activeRequests))
+					if value.retain > 0 {
+						if value.activeRequests == 0 {
+							if debugLevel {
+								otelUtils.LoggerWithTraceID(req.ctx, c.logger).Debug("Function service with no active requests", zap.String("function", key1), zap.String("address", key2), zap.Int("activeRequests", value.activeRequests))
+							}
+							vals = append(vals, value.val)
 						}
-						vals = append(vals, value.val)
+					} else {
+						value.retain--
 					}
 				}
 			}
@@ -328,6 +334,7 @@ func (c *PoolCache) ListAvailableValue() []*FuncSvc {
 	c.requestChannel <- &request{
 		requestType:     listAvailableValue,
 		responseChannel: respChannel,
+		retain:          2,
 	}
 	resp := <-respChannel
 	return resp.allValues
