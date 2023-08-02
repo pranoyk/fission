@@ -209,14 +209,13 @@ func (c *PoolCache) service() {
 					if debugLevel {
 						otelUtils.LoggerWithTraceID(req.ctx, c.logger).Debug("Reading active requests", zap.String("function", key1), zap.String("address", key2), zap.Int("activeRequests", value.activeRequests))
 					}
-					if value.retain > 0 {
-						if value.activeRequests == 0 {
-							if debugLevel {
-								otelUtils.LoggerWithTraceID(req.ctx, c.logger).Debug("Function service with no active requests", zap.String("function", key1), zap.String("address", key2), zap.Int("activeRequests", value.activeRequests))
-							}
-							vals = append(vals, value.val)
+					if value.retain == 0 && value.activeRequests == 0 {
+						if debugLevel {
+							otelUtils.LoggerWithTraceID(req.ctx, c.logger).Debug("Function service with no active requests", zap.String("function", key1), zap.String("address", key2), zap.Int("activeRequests", value.activeRequests))
 						}
-					} else {
+						vals = append(vals, value.val)
+					}
+					if value.retain > 0 {
 						value.retain--
 					}
 				}
