@@ -48,13 +48,13 @@ type (
 		activeRequests  int               // number of requests served by function pod
 		currentCPUUsage resource.Quantity // current cpu usage of the specialized function pod
 		cpuLimit        resource.Quantity // if currentCPUUsage is more than cpuLimit cache miss occurs in getValue request
-		retain          int
 	}
 
 	funcSvcGroup struct {
 		svcWaiting int
 		svcs       map[string]*funcSvcInfo
 		queue      *Queue
+		retain     int
 	}
 
 	// PoolCache implements a simple cache implementation having values mapped by two keys [function][address].
@@ -174,6 +174,7 @@ func (c *PoolCache) service() {
 			if _, ok := c.cache[req.function].svcs[req.address]; !ok {
 				c.cache[req.function].svcs[req.address] = &funcSvcInfo{}
 			}
+			c.cache[req.function].retain = req.retain
 			c.cache[req.function].svcs[req.address].val = req.value
 			c.cache[req.function].svcs[req.address].activeRequests++
 			if c.cache[req.function].svcWaiting > 0 {
@@ -209,15 +210,17 @@ func (c *PoolCache) service() {
 					if debugLevel {
 						otelUtils.LoggerWithTraceID(req.ctx, c.logger).Debug("Reading active requests", zap.String("function", key1), zap.String("address", key2), zap.Int("activeRequests", value.activeRequests))
 					}
-					if value.retain == 0 && value.activeRequests == 0 {
+					c.logger.Info("In listAvailableValue", zap.Any("value.retain", values.retain), zap.Any("value.activeRequests", value.activeRequests))
+					if values.retain == 0 && value.activeRequests == 0 {
 						if debugLevel {
 							otelUtils.LoggerWithTraceID(req.ctx, c.logger).Debug("Function service with no active requests", zap.String("function", key1), zap.String("address", key2), zap.Int("activeRequests", value.activeRequests))
 						}
 						vals = append(vals, value.val)
 					}
-					if value.retain > 0 {
-						value.retain--
+					if values.retain > 0 {
+						values.retain--
 					}
+					c.logger.Info("final count", zap.Any("value.retain", values.retain), zap.Any("value.activeRequests", value.activeRequests))
 				}
 			}
 			resp.allValues = vals
@@ -333,7 +336,6 @@ func (c *PoolCache) ListAvailableValue() []*FuncSvc {
 	c.requestChannel <- &request{
 		requestType:     listAvailableValue,
 		responseChannel: respChannel,
-		retain:          2,
 	}
 	resp := <-respChannel
 	return resp.allValues
@@ -351,6 +353,7 @@ func (c *PoolCache) SetSvcValue(ctx context.Context, function, address string, v
 		cpuUsage:        cpuLimit,
 		requestsPerPod:  requestsPerPod,
 		responseChannel: respChannel,
+		retain:          2,
 	}
 }
 
