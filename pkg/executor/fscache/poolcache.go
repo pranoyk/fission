@@ -55,7 +55,6 @@ type (
 		svcs       map[string]*funcSvcInfo
 		queue      *Queue
 		toRetain   int
-		retained   int
 	}
 
 	// PoolCache implements a simple cache implementation having values mapped by two keys [function][address].
@@ -206,25 +205,25 @@ func (c *PoolCache) service() {
 		case listAvailableValue:
 			vals := make([]*FuncSvc, 0)
 			for key1, values := range c.cache {
-				c.logger.Info("In listAvailableValue", zap.Any("value.toRetain", values.toRetain), zap.Any("value.retained", values.retained), zap.Any("value.svcs", len(values.svcs)))
-				values.retained = 0
+				c.logger.Info("In listAvailableValue", zap.Any("value.toRetain", values.toRetain), zap.Any("value.svcs", len(values.svcs)))
+				retained := 0
 				for key2, value := range values.svcs {
-					if values.retained < values.toRetain {
-						values.retained++
+					if retained < values.toRetain {
+						retained++
 						continue
 					}
 					debugLevel := c.logger.Core().Enabled(zap.DebugLevel)
 					if debugLevel {
 						otelUtils.LoggerWithTraceID(req.ctx, c.logger).Debug("Reading active requests", zap.String("function", key1), zap.String("address", key2), zap.Int("activeRequests", value.activeRequests))
 					}
-					c.logger.Info("In listAvailableValue", zap.Any("value.toRetain", values.toRetain), zap.Any("value.retained", values.retained), zap.Any("value.activeRequests", value.activeRequests))
-					if values.retained == values.toRetain || values.toRetain == 0 && value.activeRequests == 0 {
+					c.logger.Info("In listAvailableValue", zap.Any("value.toRetain", values.toRetain), zap.Any("value.activeRequests", value.activeRequests))
+					if retained == values.toRetain || values.toRetain == 0 && value.activeRequests == 0 {
 						if debugLevel {
 							otelUtils.LoggerWithTraceID(req.ctx, c.logger).Debug("Function service with no active requests", zap.String("function", key1), zap.String("address", key2), zap.Int("activeRequests", value.activeRequests))
 						}
 						vals = append(vals, value.val)
 					}
-					c.logger.Info("final count", zap.Any("value.toRetain", values.toRetain), zap.Any("value.retained", values.retained), zap.Any("value.activeRequests", value.activeRequests))
+					c.logger.Info("final count", zap.Any("value.toRetain", values.toRetain), zap.Any("value.activeRequests", value.activeRequests))
 				}
 			}
 			resp.allValues = vals
